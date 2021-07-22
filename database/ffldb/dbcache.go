@@ -516,6 +516,9 @@ func (c *dbCache) flush() error {
 		return err
 	}
 
+	cachedKeys.Recycle()
+	cachedRemove.Recycle()
+
 	return nil
 }
 
@@ -574,9 +577,16 @@ func (c *dbCache) commitTx(tx *transaction) error {
 			return err
 		}
 
+		pk := tx.pendingKeys
+		pr := tx.pendingRemove
+
 		// Clear the transaction entries since they have been committed.
 		tx.pendingKeys = nil
 		tx.pendingRemove = nil
+
+		pk.Recycle()
+		pr.Recycle()
+
 		return nil
 	}
 
