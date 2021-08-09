@@ -108,6 +108,7 @@ func NewNodeReplayCommand() *cobra.Command {
 			}
 
 			showNode(n)
+			n.Close()
 			return nil
 		},
 	}

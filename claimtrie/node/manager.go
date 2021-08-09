@@ -65,6 +65,9 @@ func (nm *BaseManager) NodeAt(height int32, name []byte) (*Node, error) {
 
 		n, err = nm.newNodeFromChanges(changes, height)
 		if err != nil {
+			if n != nil {
+				n.Close()
+			}
 			return nil, errors.Wrap(err, "in new node")
 		}
 		// TODO: how can we tell what needs to be cached?
@@ -78,6 +81,9 @@ func (nm *BaseManager) NodeAt(height int32, name []byte) (*Node, error) {
 		n = n.Clone()
 		updated, err := nm.updateFromChanges(n, changes, height)
 		if err != nil {
+			if n != nil {
+				n.Close()
+			}
 			return nil, errors.Wrap(err, "in update from changes")
 		}
 		if !updated {
@@ -122,6 +128,7 @@ func (nm *BaseManager) updateFromChanges(n *Node, changes []change.Change, heigh
 		delay := nm.getDelayForName(n, chg)
 		err := n.ApplyChange(chg, delay)
 		if err != nil {
+			n.Close()
 			return false, errors.Wrap(err, "in apply change")
 		}
 	}
@@ -129,6 +136,7 @@ func (nm *BaseManager) updateFromChanges(n *Node, changes []change.Change, heigh
 	if count <= 0 {
 		// we applied no changes, which means we shouldn't exist if we had all the changes
 		// or might mean nothing significant if we are applying a partial changeset
+		n.Close()
 		return false, nil
 	}
 	lastChange := changes[count-1]
@@ -418,10 +426,13 @@ func (nm *BaseManager) hasChildren(name []byte, height int32, spentChildren map[
 			return true // children that are spent in the same block cannot count as active children
 		}
 		n, _ := nm.newNodeFromChanges(changes, height)
-		if n != nil && n.HasActiveBestClaim() {
-			c[changes[0].Name[len(name)]] = true
-			if len(c) >= required {
-				return false
+		if n != nil {
+			defer n.Close()
+			if n.HasActiveBestClaim() {
+				c[changes[0].Name[len(name)]] = true
+				if len(c) >= required {
+					return false
+				}
 			}
 		}
 		return true
