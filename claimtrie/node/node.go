@@ -294,10 +294,17 @@ func (n *Node) activateAllClaims(height int32) int {
 
 func (n *Node) SortClaimsByBid() {
 
-	// purposefully sorting by descent
+	// purposefully sorting by descent via func parameter order:
 	sort.Slice(n.Claims, func(j, i int) bool {
-		iAmount := n.Claims[i].Amount + n.SupportSums[n.Claims[i].ClaimID.Key()]
-		jAmount := n.Claims[j].Amount + n.SupportSums[n.Claims[j].ClaimID.Key()]
+		// SupportSums only include active values; do the same for amount. No active claim will have a zero amount
+		iAmount := n.SupportSums[n.Claims[i].ClaimID.Key()]
+		if n.Claims[i].Status == Activated {
+			iAmount += n.Claims[i].Amount
+		}
+		jAmount := n.SupportSums[n.Claims[j].ClaimID.Key()]
+		if n.Claims[j].Status == Activated {
+			jAmount += n.Claims[j].Amount
+		}
 		switch {
 		case iAmount < jAmount:
 			return true

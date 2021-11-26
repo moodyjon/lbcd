@@ -241,10 +241,14 @@ func handleGetClaimsForNameBySeq(s *rpcServer, cmd interface{}, _ <-chan struct{
 	}, nil
 }
 
-func toClaimResult(s *rpcServer, i int32, node *node.Node, includeValues *bool) (btcjson.ClaimResult, error) {
-	claim := node.Claims[i]
+func toClaimResult(s *rpcServer, i int32, n *node.Node, includeValues *bool) (btcjson.ClaimResult, error) {
+	claim := n.Claims[i]
 	address, value, err := lookupValue(s, claim.OutPoint, includeValues)
-	supports, err := toSupportResults(s, i, node, includeValues)
+	supports, err := toSupportResults(s, i, n, includeValues)
+	effectiveAmount := n.SupportSums[claim.ClaimID.Key()] // should only be active supports
+	if claim.Status == node.Activated {
+		effectiveAmount += claim.Amount
+	}
 	return btcjson.ClaimResult{
 		ClaimID:         claim.ClaimID.String(),
 		Height:          claim.AcceptedAt,
@@ -253,7 +257,7 @@ func toClaimResult(s *rpcServer, i int32, node *node.Node, includeValues *bool) 
 		N:               claim.OutPoint.Index,
 		Bid:             i, // assuming sorted by bid
 		Amount:          claim.Amount,
-		EffectiveAmount: claim.Amount + node.SupportSums[claim.ClaimID.Key()],
+		EffectiveAmount: effectiveAmount,
 		Sequence:        claim.Sequence,
 		Supports:        supports,
 		Address:         address,

@@ -167,10 +167,11 @@ func TestClaimSort(t *testing.T) {
 	param.ActiveParams.ExtendedClaimExpirationTime = 1000
 
 	n := New()
-	n.Claims = append(n.Claims, &Claim{OutPoint: *out2, AcceptedAt: 3, Amount: 3, ClaimID: change.ClaimID{2}})
-	n.Claims = append(n.Claims, &Claim{OutPoint: *out3, AcceptedAt: 3, Amount: 2, ClaimID: change.ClaimID{3}})
-	n.Claims = append(n.Claims, &Claim{OutPoint: *out3, AcceptedAt: 4, Amount: 2, ClaimID: change.ClaimID{4}})
-	n.Claims = append(n.Claims, &Claim{OutPoint: *out1, AcceptedAt: 3, Amount: 4, ClaimID: change.ClaimID{1}})
+	n.Claims = append(n.Claims, &Claim{OutPoint: *out2, AcceptedAt: 3, Amount: 3, ClaimID: change.ClaimID{2}, Status: Activated})
+	n.Claims = append(n.Claims, &Claim{OutPoint: *out3, AcceptedAt: 3, Amount: 2, ClaimID: change.ClaimID{3}, Status: Activated})
+	n.Claims = append(n.Claims, &Claim{OutPoint: *out3, AcceptedAt: 4, Amount: 2, ClaimID: change.ClaimID{4}, Status: Activated})
+	n.Claims = append(n.Claims, &Claim{OutPoint: *out1, AcceptedAt: 3, Amount: 4, ClaimID: change.ClaimID{1}, Status: Activated})
+	n.Claims = append(n.Claims, &Claim{OutPoint: *out1, AcceptedAt: 1, Amount: 9, ClaimID: change.ClaimID{5}, Status: Accepted})
 	n.SortClaimsByBid()
 
 	r.Equal(int64(4), n.Claims[0].Amount)
