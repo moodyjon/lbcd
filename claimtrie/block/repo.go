@@ -11,4 +11,5 @@ type Repo interface {
 	Get(height int32) (*chainhash.Hash, error)
 	Close() error
 	Flush() error
+	Delete(heightMin, heightMax int32) error
 }

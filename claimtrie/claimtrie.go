@@ -322,6 +322,7 @@ func (ct *ClaimTrie) ResetHeight(height int32) error {
 		return err
 	}
 
+	oldHeight := ct.height
 	ct.height = height // keep this before the rebuild
 
 	if passedHashFork {
@@ -335,7 +336,8 @@ func (ct *ClaimTrie) ResetHeight(height int32) error {
 	if !ct.MerkleHash().IsEqual(hash) {
 		return errors.Errorf("unable to restore the hash at height %d", height)
 	}
-	return nil
+
+	return errors.WithStack(ct.blockRepo.Delete(height+1, oldHeight))
 }
 
 func (ct *ClaimTrie) runFullTrieRebuild(names [][]byte, interrupt <-chan struct{}) {

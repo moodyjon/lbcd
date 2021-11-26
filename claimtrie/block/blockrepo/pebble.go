@@ -59,6 +59,16 @@ func (repo *Pebble) Set(height int32, hash *chainhash.Hash) error {
 	return errors.WithStack(repo.db.Set(key, hash[:], pebble.NoSync))
 }
 
+func (repo *Pebble) Delete(heightMin, heightMax int32) error {
+	lower := make([]byte, 4)
+	binary.BigEndian.PutUint32(lower, uint32(heightMin))
+
+	upper := make([]byte, 4)
+	binary.BigEndian.PutUint32(upper, uint32(heightMax)+1)
+
+	return errors.Wrap(repo.db.DeleteRange(lower, upper, pebble.NoSync), "on range delete")
+}
+
 func (repo *Pebble) Close() error {
 
 	err := repo.db.Flush()
