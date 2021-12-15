@@ -22,7 +22,7 @@ require (
 	github.com/jrick/logrotate v1.0.0
 	github.com/klauspost/compress v1.13.6 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
-	github.com/lbryio/lbcutil v1.0.201
+	github.com/lbryio/lbcutil v1.0.202-rc2
 	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/rogpeppe/go-internal v1.8.0 // indirect
@@ -30,7 +30,7 @@ require (
 	github.com/spf13/cobra v1.1.3
 	github.com/stretchr/testify v1.7.0
 	github.com/vmihailenco/msgpack/v5 v5.3.2
-	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/crypto v0.0.0-20211209193657-4570a0811e8b
 	golang.org/x/exp v0.0.0-20211123021643-48cbe7f80d7c // indirect
 	golang.org/x/sys v0.0.0-20211123173158-ef496fb156ab // indirect
 	golang.org/x/text v0.3.7
