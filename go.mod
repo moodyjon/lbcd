@@ -5,7 +5,6 @@ go 1.17
 require (
 	github.com/btcsuite/btclog v0.0.0-20170628155309-84c8d2346e9f
 	github.com/btcsuite/go-socks v0.0.0-20170105172521-4720035b7bfd
-	github.com/btcsuite/goleveldb v1.0.0
 	github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792
 	github.com/btcsuite/winsvc v1.0.0
 	github.com/cockroachdb/errors v1.8.6
@@ -20,6 +19,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.21.7
 	github.com/spf13/cobra v1.1.3
 	github.com/stretchr/testify v1.7.0
+	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/vmihailenco/msgpack/v5 v5.3.2
 	golang.org/x/crypto v0.0.0-20211209193657-4570a0811e8b
 	golang.org/x/text v0.3.7
@@ -29,7 +29,6 @@ require (
 	github.com/DataDog/zstd v1.5.0 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
-	github.com/btcsuite/snappy-go v1.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20211118104740-dabe8e521a4f // indirect
 	github.com/cockroachdb/redact v1.1.3 // indirect
@@ -43,7 +42,6 @@ require (
 	github.com/klauspost/compress v1.13.6 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/onsi/ginkgo v1.14.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
