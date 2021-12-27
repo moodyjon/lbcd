@@ -7,7 +7,6 @@ import (
 
 	"github.com/lbryio/lbcd/chaincfg/chainhash"
 	"github.com/lbryio/lbcd/claimtrie/change"
-	"github.com/lbryio/lbcd/claimtrie/param"
 	"github.com/lbryio/lbcd/wire"
 )
 
@@ -56,15 +55,6 @@ func (c *Claim) setActiveAt(height int32) *Claim {
 func (c *Claim) setStatus(status Status) *Claim {
 	c.Status = status
 	return c
-}
-
-func (c *Claim) ExpireAt() int32 {
-
-	if c.AcceptedAt+param.ActiveParams.OriginalClaimExpirationTime > param.ActiveParams.ExtendedClaimExpirationForkHeight {
-		return c.AcceptedAt + param.ActiveParams.ExtendedClaimExpirationTime
-	}
-
-	return c.AcceptedAt + param.ActiveParams.OriginalClaimExpirationTime
 }
 
 func OutPointLess(a, b wire.OutPoint) bool {

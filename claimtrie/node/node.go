@@ -156,6 +156,16 @@ func (n *Node) updateTakeoverHeight(height int32, name []byte, refindBest bool) 
 
 func (n *Node) handleExpiredAndActivated(height int32) int {
 
+	ot := param.ActiveParams.OriginalClaimExpirationTime
+	et := param.ActiveParams.ExtendedClaimExpirationTime
+	fk := param.ActiveParams.ExtendedClaimExpirationForkHeight
+	expiresAt := func(c *Claim) int32 {
+		if c.AcceptedAt+ot > fk {
+			return c.AcceptedAt + et
+		}
+		return c.AcceptedAt + ot
+	}
+
 	changes := 0
 	update := func(items ClaimList, sums map[string]int64) ClaimList {
 		for i := 0; i < len(items); i++ {
@@ -167,7 +177,7 @@ func (n *Node) handleExpiredAndActivated(height int32) int {
 					sums[c.ClaimID.Key()] += c.Amount
 				}
 			}
-			if c.ExpireAt() <= height || c.Status == Deactivated {
+			if c.Status == Deactivated || expiresAt(c) <= height {
 				if i < len(items)-1 {
 					items[i] = items[len(items)-1]
 					i--
@@ -190,11 +200,22 @@ func (n *Node) handleExpiredAndActivated(height int32) int {
 // be refreshed due to changes of claims or supports.
 func (n Node) NextUpdate() int32 {
 
+	ot := param.ActiveParams.OriginalClaimExpirationTime
+	et := param.ActiveParams.ExtendedClaimExpirationTime
+	fk := param.ActiveParams.ExtendedClaimExpirationForkHeight
+	expiresAt := func(c *Claim) int32 {
+		if c.AcceptedAt+ot > fk {
+			return c.AcceptedAt + et
+		}
+		return c.AcceptedAt + ot
+	}
+
 	next := int32(math.MaxInt32)
 
 	for _, c := range n.Claims {
-		if c.ExpireAt() < next {
-			next = c.ExpireAt()
+		ea := expiresAt(c)
+		if ea < next {
+			next = ea
 		}
 		// if we're not active, we need to go to activeAt unless we're still invisible there
 		if c.Status == Accepted {
@@ -209,8 +230,9 @@ func (n Node) NextUpdate() int32 {
 	}
 
 	for _, s := range n.Supports {
-		if s.ExpireAt() < next {
-			next = s.ExpireAt()
+		es := expiresAt(s)
+		if es < next {
+			next = es
 		}
 		if s.Status == Accepted {
 			min := s.ActiveAt
