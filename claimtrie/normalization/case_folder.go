@@ -38,7 +38,7 @@ func init() {
 	}
 }
 
-func CaseFold(name []byte) []byte {
+func caseFold(name []byte) []byte {
 	var b bytes.Buffer
 	b.Grow(len(name))
 	for i := 0; i < len(name); {

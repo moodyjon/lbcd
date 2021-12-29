@@ -4,6 +4,7 @@
 package normalization
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 	"unicode/utf8"
@@ -62,4 +63,12 @@ func TestBlock760150_1020105(t *testing.T) {
 		assert.Equal(t, a, b, "%d: %s != %s", i, string(a), string(b))
 		// t.Logf("%s -> %s", s, string(b))
 	}
+}
+
+func TestBlock1085612(t *testing.T) {
+	s, err := hex.DecodeString("6eccb7cd9dcc92cd90cc86cc80cc80cd91cd9dcd8acd80cd92cc94cc85cc8fccbdcda0ccbdcd80cda0cd84cc94cc8ccc9acd84cc94cd9bcda0cca7cc99ccaccd99cca9cca7")
+	assert.NoError(t, err)
+	a := normalizeICU(s)
+	b := normalizeGo(s)
+	assert.Equal(t, a, b, "%s != %s, %v", string(a), string(b), bytes.Equal(b, s))
 }

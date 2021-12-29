@@ -1,7 +1,12 @@
 package normalization
 
 import (
+	"bufio"
+	"bytes"
+	_ "embed"
 	"math/rand"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,4 +56,34 @@ func benchmarkNormalize(b *testing.B, normalize func(value []byte) []byte) {
 		s := normalize(strings[i])
 		require.True(b, len(s) >= 8)
 	}
+}
+
+//go:embed NormalizationTest_v11.txt
+var nfdTests string
+
+func TestDecomposition(t *testing.T) {
+	r := require.New(t)
+
+	scanner := bufio.NewScanner(strings.NewReader(nfdTests))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) <= 0 || line[0] == '@' || line[0] == '#' {
+			continue
+		}
+		splits := strings.Split(line, ";")
+		source := convertToBytes(splits[0])
+		targetNFD := convertToBytes(splits[2])
+		fixed := decompose(source)
+		r.True(bytes.Equal(targetNFD, fixed), "Failed on %s -> %s. Got %U, not %U", splits[0], splits[2], fixed, targetNFD)
+	}
+}
+
+func convertToBytes(s string) []byte {
+	splits := strings.Split(s, " ")
+	var b bytes.Buffer
+	for i := range splits {
+		value, _ := strconv.ParseUint(splits[i], 16, len(splits[i])*4)
+		b.WriteRune(rune(value))
+	}
+	return b.Bytes()
 }

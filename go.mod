@@ -22,7 +22,6 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/vmihailenco/msgpack/v5 v5.3.2
 	golang.org/x/crypto v0.0.0-20211209193657-4570a0811e8b
-	golang.org/x/text v0.3.7
 )
 
 require (

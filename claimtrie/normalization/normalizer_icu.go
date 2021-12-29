@@ -31,6 +31,8 @@ package normalization
 // }
 import "C"
 import (
+	"bytes"
+	"encoding/hex"
 	"fmt"
 	"unsafe"
 )
@@ -47,21 +49,29 @@ func IcuVersion() string {
 }
 
 func normalizeICU(value []byte) []byte {
+	original := value
 	if len(value) <= 0 {
 		return value
 	}
+
+	other := normalizeGo(value)
+
 	name := (*C.char)(unsafe.Pointer(&value[0]))
 	length := C.int(len(value))
 
 	// hopefully this is a stack alloc (but it may be a bit large for that):
 	var resultName [512]byte // inputs are restricted to 255 chars; it shouldn't expand too much past that
-	result := unsafe.Pointer(&resultName[0])
+	pointer := unsafe.Pointer(&resultName[0])
 
-	resultLength := C.normalize(name, length, (*C.char)(result))
-	if resultLength == 0 {
-		return value
+	resultLength := C.normalize(name, length, (*C.char)(pointer))
+	if resultLength > 0 {
+		value = C.GoBytes(pointer, resultLength)
 	}
 
-	// return resultName[0:resultLength] -- we want to shrink the result (not use a slice on 1024)
-	return C.GoBytes(result, resultLength)
+	// return resultName[0:resultLength] -- we want to shrink the pointer (not use a slice on 1024)
+	if !bytes.Equal(other, value) {
+		fmt.Printf("Failed with %s, %s != %s,\n\t%s, %s != %s,\n", original, value, other,
+			hex.EncodeToString(original), hex.EncodeToString(value), hex.EncodeToString(other))
+	}
+	return value
 }
