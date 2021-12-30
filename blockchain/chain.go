@@ -1723,7 +1723,7 @@ func (b *BlockChain) reconsiderBlock(hash *chainhash.Hash) error {
 	}
 
 	// No need to reconsider, it is already valid.
-	if node.status.KnownValid() {
+	if node.status.KnownValid() && !node.status.KnownInvalid() { // second clause works around old bug
 		err := fmt.Errorf("block %s is already valid", hash)
 		return err
 	}
