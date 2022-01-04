@@ -1,5 +1,4 @@
-lbcd Websockets Example
-=======================
+# lbcd Websockets Example
 
 This example shows how to use the rpcclient package to connect to a btcd RPC
 server using TLS-secured websockets, register for block connected and block
@@ -7,25 +6,27 @@ disconnected notifications, and get the current block count.
 
 ## Running the Example
 
-The first step is to use `go get` to download and install the rpcclient package:
+The first step is to clone the lbcd package:
 
 ```bash
-$ go get github.com/lbryio/lbcd/rpcclient
+$ git clone github.com/lbryio/lbcd
 ```
 
-Next, modify the `main.go` source to specify the correct RPC username and
-password for the RPC server:
+Next, navigate to the example's directory and modify the `main.go` source to
+specify the correct RPC username and password for the RPC server:
+
+```bash
+$ cd rpcclient/examples/lbcdblocknotify
+```
 
 ```Go
 	User: "yourrpcuser",
 	Pass: "yourrpcpass",
 ```
 
-Finally, navigate to the example's directory and run it with:
+Finally, run it with:
 
 ```bash
-$ git clone github.com/lbryio/lbcd
-$ cd rpcclient/examples/lbcdblocknotify
 $ go run .
 ```
 
