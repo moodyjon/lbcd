@@ -1966,6 +1966,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		valid = signature.Verify(hash, pubKey)
 	}
 
+	log.Infof("type: %d, hash: %0x, flags: %0x, sigBytes: %0x\n", hashType, hash, vm.flags, sigBytes)
 	if !valid && vm.hasFlag(ScriptVerifyNullFail) && len(sigBytes) > 0 {
 		str := "signature not empty on failed checksig"
 		return scriptError(ErrNullFail, str)
