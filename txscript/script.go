@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/lbryio/lbcd/chaincfg/chainhash"
 	"github.com/lbryio/lbcd/wire"
 )
@@ -549,7 +550,9 @@ func calcSignatureHash(sigScript []byte, hashType SigHashType, tx *wire.MsgTx, i
 
 	// Remove all instances of OP_CODESEPARATOR from the script.
 	sigScript = removeOpcodeRaw(sigScript, OP_CODESEPARATOR)
+	log.Infof("sigScript (removeOpcodeRaw: %0x", sigScript)
 
+	log.Infof("tx: %s", spew.Sdump(tx))
 	// Make a shallow copy of the transaction, zeroing out the script for
 	// all inputs that are not currently being processed.
 	txCopy := shallowCopyTx(tx)
@@ -599,6 +602,7 @@ func calcSignatureHash(sigScript []byte, hashType SigHashType, tx *wire.MsgTx, i
 	if hashType&SigHashAnyOneCanPay != 0 {
 		txCopy.TxIn = txCopy.TxIn[idx : idx+1]
 	}
+	log.Infof("txCopy: %s", spew.Sdump(txCopy))
 
 	// The final hash is the double sha256 of both the serialized modified
 	// transaction and the hash type (encoded as a 4-byte little-endian
@@ -606,6 +610,7 @@ func calcSignatureHash(sigScript []byte, hashType SigHashType, tx *wire.MsgTx, i
 	wbuf := bytes.NewBuffer(make([]byte, 0, txCopy.SerializeSizeStripped()+4))
 	txCopy.SerializeNoWitness(wbuf)
 	binary.Write(wbuf, binary.LittleEndian, hashType)
+	log.Infof("serialized tx for double hash: %0x", wbuf.Bytes())
 	return chainhash.DoubleHashB(wbuf.Bytes())
 }
 

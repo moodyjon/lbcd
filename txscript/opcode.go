@@ -1938,6 +1938,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		vm.dstack.PushBool(false)
 		return nil
 	}
+	log.Infof("pkBytes: %0x, x: %s, y: %s, params: %s", pkBytes, pubKey.X, pubKey.Y, pubKey.Curve.Params().Name)
 
 	var signature *btcec.Signature
 	if vm.hasFlag(ScriptVerifyStrictEncoding) ||
@@ -1951,6 +1952,7 @@ func opcodeCheckSig(op *opcode, data []byte, vm *Engine) error {
 		vm.dstack.PushBool(false)
 		return nil
 	}
+	log.Infof("signature: %0x R: %s, S: %s", signature.Serialize(), signature.R, signature.S)
 
 	var valid bool
 	if vm.sigCache != nil {
