@@ -53,10 +53,11 @@ func (nm *BaseManager) NodeAt(height int32, name []byte) (*Node, error) {
 
 	n, changes, oldHeight := nm.cache.fetch(name, height)
 	if n == nil {
-		changes, err := nm.repo.LoadChanges(name)
+		changes, closer, err := nm.repo.LoadChanges(name)
 		if err != nil {
 			return nil, errors.Wrap(err, "in load changes")
 		}
+		defer closer()
 
 		if nm.tempChanges != nil { // making an assumption that we only ever have tempChanges for a single block
 			changes = append(changes, nm.tempChanges[string(name)]...)
