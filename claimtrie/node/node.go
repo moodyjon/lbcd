@@ -14,12 +14,12 @@ type Node struct {
 	TakenOverAt int32     // The height at when the current BestClaim took over.
 	Claims      ClaimList // List of all Claims.
 	Supports    ClaimList // List of all Supports, including orphaned ones.
-	SupportSums map[string]int64
+	SupportSums map[change.ClaimID]int64
 }
 
 // New returns a new node.
 func New() *Node {
-	return &Node{SupportSums: map[string]int64{}}
+	return &Node{SupportSums: map[change.ClaimID]int64{}}
 }
 
 func (n *Node) HasActiveBestClaim() bool {
@@ -166,7 +166,7 @@ func (n *Node) handleExpiredAndActivated(height int32) int {
 	}
 
 	changes := 0
-	update := func(items ClaimList, sums map[string]int64) ClaimList {
+	update := func(items ClaimList, sums map[change.ClaimID]int64) ClaimList {
 		for i := 0; i < len(items); i++ {
 			c := items[i]
 			if c.Status == Accepted && c.ActiveAt <= height && c.VisibleAt <= height {
@@ -343,7 +343,7 @@ func (n *Node) SortClaimsByBid() {
 func (n *Node) Clone() *Node {
 	clone := New()
 	if n.SupportSums != nil {
-		clone.SupportSums = map[string]int64{}
+		clone.SupportSums = map[change.ClaimID]int64{}
 		for key, value := range n.SupportSums {
 			clone.SupportSums[key] = value
 		}
