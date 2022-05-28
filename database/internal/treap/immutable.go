@@ -10,14 +10,9 @@ import (
 	"sync"
 )
 
-var nodePool = &sync.Pool{New: func() interface{} { return newTreapNode(nil, nil, 0) }}
-
 // cloneTreapNode returns a shallow copy of the passed node.
 func cloneTreapNode(node *treapNode) *treapNode {
-	clone := nodePool.Get().(*treapNode)
-	clone.key = node.key
-	clone.value = node.value
-	clone.priority = node.priority
+	clone := getTreapNode(node.key, node.value, node.priority, node.generation+1)
 	clone.left = node.left
 	clone.right = node.right
 	return clone
@@ -46,11 +41,19 @@ type Immutable struct {
 	// totalSize is the best estimate of the total size of of all data in
 	// the treap including the keys, values, and node sizes.
 	totalSize uint64
+
+	// generation number starts at 0 after NewImmutable(), and
+	// is incremented with every Put()/Delete().
+	generation int
+
+	// snap is a pointer to a node in snapshot history linked list.
+	// A value nil means no snapshots are outstanding.
+	snap *SnapRecord
 }
 
 // newImmutable returns a new immutable treap given the passed parameters.
-func newImmutable(root *treapNode, count int, totalSize uint64) *Immutable {
-	return &Immutable{root: root, count: count, totalSize: totalSize}
+func newImmutable(root *treapNode, count int, totalSize uint64, generation int, snap *SnapRecord) *Immutable {
+	return &Immutable{root: root, count: count, totalSize: totalSize, generation: generation, snap: snap}
 }
 
 // Len returns the number of items stored in the treap.
@@ -107,8 +110,8 @@ func (t *Immutable) Get(key []byte) []byte {
 	return nil
 }
 
-// Put inserts the passed key/value pair.
-func (t *Immutable) Put(key, value []byte) *Immutable {
+// put inserts the passed key/value pair.
+func (t *Immutable) put(key, value []byte, bumpGen int) (tp *Immutable, old parentStack) {
 	// Use an empty byte slice for the value when none was provided.  This
 	// ultimately allows key existence to be determined from the value since
 	// an empty byte slice is distinguishable from nil.
@@ -118,8 +121,8 @@ func (t *Immutable) Put(key, value []byte) *Immutable {
 
 	// The node is the root of the tree if there isn't already one.
 	if t.root == nil {
-		root := newTreapNode(key, value, rand.Int())
-		return newImmutable(root, 1, nodeSize(root))
+		root := getTreapNode(key, value, rand.Int(), t.generation+bumpGen)
+		return newImmutable(root, 1, nodeSize(root), t.generation+bumpGen, t.snap), parentStack{}
 	}
 
 	// Find the binary tree insertion point and construct a replaced list of
@@ -131,9 +134,11 @@ func (t *Immutable) Put(key, value []byte) *Immutable {
 	// When the key matches an entry already in the treap, replace the node
 	// with a new one that has the new value set and return.
 	var parents parentStack
+	var oldParents parentStack
 	var compareResult int
 	for node := t.root; node != nil; {
 		// Clone the node and link its parent to it if needed.
+		oldParents.Push(node)
 		nodeCopy := cloneTreapNode(node)
 		if oldParent := parents.At(0); oldParent != nil {
 			if oldParent.left == node {
@@ -164,14 +169,11 @@ func (t *Immutable) Put(key, value []byte) *Immutable {
 		newRoot := parents.At(parents.Len() - 1)
 		newTotalSize := t.totalSize - uint64(len(node.value)) +
 			uint64(len(value))
-		return newImmutable(newRoot, t.count, newTotalSize)
+		return newImmutable(newRoot, t.count, newTotalSize, t.generation+bumpGen, t.snap), oldParents
 	}
 
 	// Link the new node into the binary tree in the correct position.
-	node := nodePool.Get().(*treapNode)
-	node.key = key
-	node.value = value
-	node.priority = rand.Int()
+	node := getTreapNode(key, value, rand.Int(), t.generation+bumpGen)
 	parent := parents.At(0)
 	if compareResult < 0 {
 		parent.left = node
@@ -211,19 +213,59 @@ func (t *Immutable) Put(key, value []byte) *Immutable {
 		}
 	}
 
-	return newImmutable(newRoot, t.count+1, t.totalSize+nodeSize(node))
+	return newImmutable(newRoot, t.count+1, t.totalSize+nodeSize(node), t.generation+bumpGen, t.snap), oldParents
 }
 
-// Delete removes the passed key from the treap and returns the resulting treap
+// Put is the immutable variant of put. Generation number is bumped, and old
+// nodes become garbage unless referenced elswhere.
+func (t *Immutable) Put(key, value []byte) *Immutable {
+	tp, _ := t.put(key, value, 1)
+	return tp
+}
+
+// PutM is the mutable variant of put. Generation number is NOT bumped, and old
+// nodes are recycled if possible. This is only safe/useful in scenarios where
+// multiple Put/Delete() ops are applied to a unique treap and no snapshots/aliases
+// of the intermediate treap states are created or desired. For example:
+//
+//     for i := range keys {
+//         t = t.Put(keys[i])
+//     }
+//
+// ...may be replaced with:
+//
+//     for i := range keys {
+//         PutM(t, keys[i], nil)
+//     }
+//
+// If "excluded" is provided, that snapshot is ignored when counting
+// snapshot records.
+//
+func PutM(dest **Immutable, key, value []byte, excluded *SnapRecord) {
+	tp, old := (*dest).put(key, value, 0)
+	// Examine old nodes and recycle if possible.
+	snapRecordMutex.Lock()
+	defer snapRecordMutex.Unlock()
+	snapCount := (*dest).snapCount(excluded)
+	for old.Len() > 0 {
+		node := old.Pop()
+		if node.generation == tp.generation && snapCount == 0 {
+			putTreapNode(node)
+		}
+	}
+	*dest = tp
+}
+
+// del removes the passed key from the treap and returns the resulting treap
 // if it exists.  The original immutable treap is returned if the key does not
 // exist.
-func (t *Immutable) Delete(key []byte) *Immutable {
+func (t *Immutable) del(key []byte, bumpGen int) (d *Immutable, old parentStack) {
 	// Find the node for the key while constructing a list of parents while
 	// doing so.
-	var parents parentStack
+	var oldParents parentStack
 	var delNode *treapNode
 	for node := t.root; node != nil; {
-		parents.Push(node)
+		oldParents.Push(node)
 
 		// Traverse left or right depending on the result of the
 		// comparison.
@@ -244,14 +286,14 @@ func (t *Immutable) Delete(key []byte) *Immutable {
 
 	// There is nothing to do if the key does not exist.
 	if delNode == nil {
-		return t
+		return t, parentStack{}
 	}
 
 	// When the only node in the tree is the root node and it is the one
 	// being deleted, there is nothing else to do besides removing it.
-	parent := parents.At(1)
+	parent := oldParents.At(1)
 	if parent == nil && delNode.left == nil && delNode.right == nil {
-		return newImmutable(nil, 0, 0)
+		return newImmutable(nil, 0, 0, t.generation+bumpGen, t.snap), oldParents
 	}
 
 	// Construct a replaced list of parents and the node to delete itself.
@@ -259,8 +301,8 @@ func (t *Immutable) Delete(key []byte) *Immutable {
 	// therefore all ancestors of the node that will be deleted, up to and
 	// including the root, need to be replaced.
 	var newParents parentStack
-	for i := parents.Len(); i > 0; i-- {
-		node := parents.At(i - 1)
+	for i := oldParents.Len(); i > 0; i-- {
+		node := oldParents.At(i - 1)
 		nodeCopy := cloneTreapNode(node)
 		if oldParent := newParents.At(0); oldParent != nil {
 			if oldParent.left == node {
@@ -332,7 +374,47 @@ func (t *Immutable) Delete(key []byte) *Immutable {
 		parent.left = nil
 	}
 
-	return newImmutable(newRoot, t.count-1, t.totalSize-nodeSize(delNode))
+	return newImmutable(newRoot, t.count-1, t.totalSize-nodeSize(delNode), t.generation+bumpGen, t.snap), oldParents
+}
+
+// Delete is the immutable variant of del. Generation number is bumped, and old
+// nodes become garbage unless referenced elswhere.
+func (t *Immutable) Delete(key []byte) *Immutable {
+	tp, _ := t.del(key, 1)
+	return tp
+}
+
+// DeleteM is the mutable variant of del. Generation number is NOT bumped, and old
+// nodes are recycled if possible. This is only safe/useful in scenarios where
+// multiple Put/Delete() ops are applied to a unique treap and no snapshots/aliases
+// of the intermediate treap states are created or desired. For example:
+//
+//     for i := range keys {
+//         t = t.Delete(keys[i])
+//     }
+//
+// ...may be replaced with:
+//
+//     for i := range keys {
+//         DeleteM(t, keys[i], nil)
+//     }
+//
+// If "excluded" is provided, that snapshot is ignored when counting
+// snapshot records.
+//
+func DeleteM(dest **Immutable, key []byte, excluded *SnapRecord) {
+	tp, old := (*dest).del(key, 0)
+	// Examine old nodes and recycle if possible.
+	snapRecordMutex.Lock()
+	defer snapRecordMutex.Unlock()
+	snapCount := (*dest).snapCount(excluded)
+	for old.Len() > 0 {
+		node := old.Pop()
+		if node.generation == tp.generation && snapCount == 0 {
+			putTreapNode(node)
+		}
+	}
+	*dest = tp
 }
 
 // ForEach invokes the passed function with every key/value pair in the treap
@@ -365,7 +447,79 @@ func NewImmutable() *Immutable {
 	return &Immutable{}
 }
 
+// SnapRecord assists in tracking/releasing outstanding snapshots.
+type SnapRecord struct {
+	prev *SnapRecord
+	next *SnapRecord
+}
+
+var snapRecordMutex sync.Mutex
+
+// Snapshot makes a SnapRecord and linkis it into the snapshot history of a treap.
+func (t *Immutable) Snapshot() *SnapRecord {
+	snapRecordMutex.Lock()
+	defer snapRecordMutex.Unlock()
+
+	// Link this record so it follows the existing t.snap record, if any.
+	prev := t.snap
+	var next *SnapRecord = nil
+	if prev != nil {
+		next = prev.next
+	}
+	t.snap = &SnapRecord{prev: prev, next: next}
+	if prev != nil {
+		prev.next = t.snap
+	}
+
+	return t.snap
+}
+
+// Release of SnapRecord unlinks that record from the snapshot history of a treap.
+func (r *SnapRecord) Release() {
+	snapRecordMutex.Lock()
+	defer snapRecordMutex.Unlock()
+
+	// Unlink this record.
+	if r.prev != nil {
+		r.prev.next = r.next
+	}
+	if r.next != nil {
+		r.next.prev = r.prev
+	}
+}
+
+// snapCount returns the number of snapshots outstanding which were created
+// but not released. When snapshots are absent, mutable PutM()/DeleteM() can
+// recycle nodes more aggressively. The record "exclude" is not counted.
+func (t *Immutable) snapCount(exclude *SnapRecord) int {
+	// snapRecordMutex should be locked already
+
+	sum := 0
+	if t.snap == nil {
+		// No snapshots.
+		return sum
+	}
+
+	// Count snapshots taken BEFORE creation of this instance.
+	for h := t.snap; h != nil; h = h.prev {
+		if h != exclude {
+			sum++
+		}
+	}
+
+	// Count snapshots taken AFTER creation of this instance.
+	for h := t.snap.next; h != nil; h = h.next {
+		if h != exclude {
+			sum++
+		}
+	}
+
+	return sum
+}
+
 func (t *Immutable) Recycle() {
+	snapCount := t.snapCount(nil) - 1
+
 	var parents parentStack
 	for node := t.root; node != nil; node = node.left {
 		parents.Push(node)
@@ -380,7 +534,8 @@ func (t *Immutable) Recycle() {
 			parents.Push(n)
 		}
 
-		node.Reset()
-		nodePool.Put(node)
+		if node.generation == t.generation && snapCount == 0 {
+			putTreapNode(node)
+		}
 	}
 }

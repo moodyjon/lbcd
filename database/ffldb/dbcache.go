@@ -285,9 +285,11 @@ func (iter *dbCacheIterator) Error() error {
 // dbCacheSnapshot defines a snapshot of the database cache and underlying
 // database at a particular point in time.
 type dbCacheSnapshot struct {
-	dbSnapshot    *leveldb.Snapshot
-	pendingKeys   *treap.Immutable
-	pendingRemove *treap.Immutable
+	dbSnapshot        *leveldb.Snapshot
+	pendingKeys       *treap.Immutable
+	pendingRemove     *treap.Immutable
+	pendingKeysSnap   *treap.SnapRecord
+	pendingRemoveSnap *treap.SnapRecord
 }
 
 // Has returns whether or not the passed key exists.
@@ -327,6 +329,8 @@ func (snap *dbCacheSnapshot) Get(key []byte) []byte {
 // Release releases the snapshot.
 func (snap *dbCacheSnapshot) Release() {
 	snap.dbSnapshot.Release()
+	snap.pendingKeysSnap.Release()
+	snap.pendingRemoveSnap.Release()
 	snap.pendingKeys = nil
 	snap.pendingRemove = nil
 }
@@ -407,9 +411,11 @@ func (c *dbCache) Snapshot() (*dbCacheSnapshot, error) {
 	// which is used to atomically swap the root.
 	c.cacheLock.RLock()
 	cacheSnapshot := &dbCacheSnapshot{
-		dbSnapshot:    dbSnapshot,
-		pendingKeys:   c.cachedKeys,
-		pendingRemove: c.cachedRemove,
+		dbSnapshot:        dbSnapshot,
+		pendingKeys:       c.cachedKeys,
+		pendingRemove:     c.cachedRemove,
+		pendingKeysSnap:   c.cachedKeys.Snapshot(),
+		pendingRemoveSnap: c.cachedRemove.Snapshot(),
 	}
 	c.cacheLock.RUnlock()
 	return cacheSnapshot, nil
@@ -499,12 +505,10 @@ func (c *dbCache) flush() error {
 	// Since the cached keys to be added and removed use an immutable treap,
 	// a snapshot is simply obtaining the root of the tree under the lock
 	// which is used to atomically swap the root.
-	c.cacheLock.Lock()
+	c.cacheLock.RLock()
 	cachedKeys := c.cachedKeys
 	cachedRemove := c.cachedRemove
-	c.cachedKeys = treap.NewImmutable()
-	c.cachedRemove = treap.NewImmutable()
-	c.cacheLock.Unlock()
+	c.cacheLock.RUnlock()
 
 	// Nothing to do if there is no data to flush.
 	if cachedKeys.Len() == 0 && cachedRemove.Len() == 0 {
@@ -515,6 +519,11 @@ func (c *dbCache) flush() error {
 	if err := c.commitTreaps(cachedKeys, cachedRemove); err != nil {
 		return err
 	}
+
+	c.cacheLock.Lock()
+	c.cachedKeys = treap.NewImmutable()
+	c.cachedRemove = treap.NewImmutable()
+	c.cacheLock.Unlock()
 
 	cachedKeys.Recycle()
 	cachedRemove.Recycle()
@@ -603,19 +612,23 @@ func (c *dbCache) commitTx(tx *transaction) error {
 
 	// Apply every key to add in the database transaction to the cache.
 	tx.pendingKeys.ForEach(func(k, v []byte) bool {
-		newCachedRemove = newCachedRemove.Delete(k)
-		newCachedKeys = newCachedKeys.Put(k, v)
+		treap.DeleteM(&newCachedRemove, k, tx.snapshot.pendingRemoveSnap)
+		treap.PutM(&newCachedKeys, k, v, tx.snapshot.pendingKeysSnap)
 		return true
 	})
+	pk := tx.pendingKeys
 	tx.pendingKeys = nil
+	pk.Recycle()
 
 	// Apply every key to remove in the database transaction to the cache.
 	tx.pendingRemove.ForEach(func(k, v []byte) bool {
-		newCachedKeys = newCachedKeys.Delete(k)
-		newCachedRemove = newCachedRemove.Put(k, nil)
+		treap.DeleteM(&newCachedKeys, k, tx.snapshot.pendingKeysSnap)
+		treap.PutM(&newCachedRemove, k, nil, tx.snapshot.pendingRemoveSnap)
 		return true
 	})
+	pr := tx.pendingRemove
 	tx.pendingRemove = nil
+	pr.Recycle()
 
 	// Atomically replace the immutable treaps which hold the cached keys to
 	// add and delete.
@@ -623,6 +636,7 @@ func (c *dbCache) commitTx(tx *transaction) error {
 	c.cachedKeys = newCachedKeys
 	c.cachedRemove = newCachedRemove
 	c.cacheLock.Unlock()
+
 	return nil
 }
 
