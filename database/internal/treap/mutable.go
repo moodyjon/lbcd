@@ -113,7 +113,7 @@ func (t *Mutable) Put(key, value []byte) {
 
 	// The node is the root of the tree if there isn't already one.
 	if t.root == nil {
-		node := newTreapNode(key, value, rand.Int())
+		node := getTreapNode(key, value, rand.Int(), MutableGeneration)
 		t.count = 1
 		t.totalSize = nodeSize(node)
 		t.root = node
@@ -145,10 +145,7 @@ func (t *Mutable) Put(key, value []byte) {
 	}
 
 	// Link the new node into the binary tree in the correct position.
-	node := nodePool.Get().(*treapNode)
-	node.key = key
-	node.value = value
-	node.priority = rand.Int()
+	node := getTreapNode(key, value, rand.Int(), MutableGeneration)
 	t.count++
 	t.totalSize += nodeSize(node)
 	parent := parents.At(0)
@@ -193,6 +190,7 @@ func (t *Mutable) Delete(key []byte) {
 		t.root = nil
 		t.count = 0
 		t.totalSize = 0
+		putTreapNode(node)
 		return
 	}
 
@@ -241,6 +239,7 @@ func (t *Mutable) Delete(key []byte) {
 	}
 	t.count--
 	t.totalSize -= nodeSize(node)
+	putTreapNode(node)
 }
 
 // ForEach invokes the passed function with every key/value pair in the treap
@@ -295,7 +294,8 @@ func (t *Mutable) Recycle() {
 			parents.Push(n)
 		}
 
-		node.Reset()
-		nodePool.Put(node)
+		if node.generation == MutableGeneration {
+			putTreapNode(node)
+		}
 	}
 }

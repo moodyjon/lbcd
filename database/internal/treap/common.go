@@ -6,6 +6,7 @@ package treap
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -23,7 +24,7 @@ const (
 	// size in that case is acceptable since it avoids the need to import
 	// unsafe.  It consists of 24-bytes for each key and value + 8 bytes for
 	// each of the priority, left, and right fields (24*2 + 8*3).
-	nodeFieldsSize = 72
+	nodeFieldsSize = 80
 )
 
 var (
@@ -33,20 +34,21 @@ var (
 	emptySlice = make([]byte, 0)
 )
 
+const (
+	// Generation number for nodes in a Mutable treap.
+	MutableGeneration int = -1
+	// Generation number for nodes in the free Pool.
+	PoolGeneration int = -2
+)
+
 // treapNode represents a node in the treap.
 type treapNode struct {
-	key      []byte
-	value    []byte
-	priority int
-	left     *treapNode
-	right    *treapNode
-}
-
-func (n *treapNode) Reset() {
-	n.key = nil
-	n.value = nil
-	n.left = nil
-	n.right = nil
+	key        []byte
+	value      []byte
+	priority   int
+	left       *treapNode
+	right      *treapNode
+	generation int
 }
 
 // nodeSize returns the number of bytes the specified node occupies including
@@ -55,10 +57,35 @@ func nodeSize(node *treapNode) uint64 {
 	return nodeFieldsSize + uint64(len(node.key)+len(node.value))
 }
 
-// newTreapNode returns a new node from the given key, value, and priority.  The
+// Pool of treapNode available for reuse.
+var nodePool = &sync.Pool{
+	New: func() interface{} {
+		return &treapNode{key: nil, value: nil, priority: 0, generation: PoolGeneration}
+	},
+}
+
+// getTreapNode returns a new node from the given key, value, and priority.  The
 // node is not initially linked to any others.
-func newTreapNode(key, value []byte, priority int) *treapNode {
-	return &treapNode{key: key, value: value, priority: priority}
+func getTreapNode(key, value []byte, priority int, generation int) *treapNode {
+	n := nodePool.Get().(*treapNode)
+	n.key = key
+	n.value = value
+	n.priority = priority
+	n.left = nil
+	n.right = nil
+	n.generation = generation
+	return n
+}
+
+// Put treapNode back in the nodePool for reuse.
+func putTreapNode(n *treapNode) {
+	n.key = nil
+	n.value = nil
+	n.priority = 0
+	n.left = nil
+	n.right = nil
+	n.generation = PoolGeneration
+	nodePool.Put(n)
 }
 
 // parentStack represents a stack of parent treap nodes that are used during
