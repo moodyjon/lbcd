@@ -24,7 +24,7 @@ const (
 	// size in that case is acceptable since it avoids the need to import
 	// unsafe.  It consists of 24-bytes for each key and value + 8 bytes for
 	// each of the priority, left, and right fields (24*2 + 8*3).
-	nodeFieldsSize = 80
+	nodeFieldsSize = 96
 )
 
 var (
@@ -35,10 +35,12 @@ var (
 )
 
 const (
-	// Generation number for nodes in a Mutable treap.
-	MutableGeneration int = -1
-	// Generation number for nodes in the free Pool.
-	PoolGeneration int = -2
+	// mutableGeneration is the generation number for nodes in a Mutable treap.
+	mutableGeneration int = -1
+	// recycleGeneration indicates node is scheduled for recycling back to nodePool.
+	recycleGeneration int = -2
+	// poolGeneration is the generation number for free nodes in the nodePool.
+	poolGeneration int = -3
 )
 
 // treapNode represents a node in the treap.
@@ -49,6 +51,7 @@ type treapNode struct {
 	left       *treapNode
 	right      *treapNode
 	generation int
+	next       *treapNode
 }
 
 // nodeSize returns the number of bytes the specified node occupies including
@@ -57,15 +60,15 @@ func nodeSize(node *treapNode) uint64 {
 	return nodeFieldsSize + uint64(len(node.key)+len(node.value))
 }
 
-// Pool of treapNode available for reuse.
-var nodePool = &sync.Pool{
-	New: func() interface{} {
-		return &treapNode{key: nil, value: nil, priority: 0, generation: PoolGeneration}
-	},
+func poolNewTreapNode() interface{} {
+	return &treapNode{key: nil, value: nil, priority: 0, generation: poolGeneration}
 }
 
-// getTreapNode returns a new node from the given key, value, and priority.  The
-// node is not initially linked to any others.
+// Pool of treapNode available for reuse.
+var nodePool sync.Pool = sync.Pool{New: poolNewTreapNode}
+
+// getTreapNode returns a node from nodePool with the given key, value, priority,
+// and generation. The node is not initially linked to any others.
 func getTreapNode(key, value []byte, priority int, generation int) *treapNode {
 	n := nodePool.Get().(*treapNode)
 	n.key = key
@@ -74,17 +77,22 @@ func getTreapNode(key, value []byte, priority int, generation int) *treapNode {
 	n.left = nil
 	n.right = nil
 	n.generation = generation
+	n.next = nil
 	return n
 }
 
-// Put treapNode back in the nodePool for reuse.
+// putTreapNode returns a node back to nodePool for reuse.
 func putTreapNode(n *treapNode) {
+	if n.generation <= poolGeneration {
+		panic("double free of treapNode detected")
+	}
 	n.key = nil
 	n.value = nil
 	n.priority = 0
 	n.left = nil
 	n.right = nil
-	n.generation = PoolGeneration
+	n.generation = poolGeneration
+	n.next = nil
 	nodePool.Put(n)
 }
 

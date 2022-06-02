@@ -326,6 +326,7 @@ func (iter *Iterator) ForceReseek() {
 //   	}
 //   }
 func (t *Mutable) Iterator(startKey, limitKey []byte) *Iterator {
+	t.generation++
 	iter := &Iterator{
 		t:        t,
 		root:     t.root,

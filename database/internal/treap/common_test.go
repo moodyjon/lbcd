@@ -49,7 +49,7 @@ testLoop:
 		for j := 0; j < test.numNodes; j++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(j))
-			node := newTreapNode(key[:], key[:], 0)
+			node := getTreapNode(key[:], key[:], 0, 0)
 			nodes = append(nodes, node)
 		}
 
