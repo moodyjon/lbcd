@@ -290,6 +290,7 @@ type dbCacheSnapshot struct {
 	pendingRemove     *treap.Immutable
 	pendingKeysSnap   *treap.SnapRecord
 	pendingRemoveSnap *treap.SnapRecord
+	cacheFlushed      int
 }
 
 // Has returns whether or not the passed key exists.
@@ -329,8 +330,18 @@ func (snap *dbCacheSnapshot) Get(key []byte) []byte {
 // Release releases the snapshot.
 func (snap *dbCacheSnapshot) Release() {
 	snap.dbSnapshot.Release()
-	snap.pendingKeysSnap.Release()
-	snap.pendingRemoveSnap.Release()
+	if snap.cacheFlushed > 0 && snap.pendingKeys != nil {
+		snap.pendingKeys.Recycle(snap.pendingKeysSnap)
+	}
+	if snap.cacheFlushed > 0 && snap.pendingRemove != nil {
+		snap.pendingRemove.Recycle(snap.pendingRemoveSnap)
+	}
+	if snap.pendingKeysSnap != nil {
+		snap.pendingKeysSnap.Release()
+	}
+	if snap.pendingRemoveSnap != nil {
+		snap.pendingRemoveSnap.Release()
+	}
 	snap.pendingKeys = nil
 	snap.pendingRemove = nil
 }
@@ -411,11 +422,15 @@ func (c *dbCache) Snapshot() (*dbCacheSnapshot, error) {
 	// which is used to atomically swap the root.
 	c.cacheLock.RLock()
 	cacheSnapshot := &dbCacheSnapshot{
-		dbSnapshot:        dbSnapshot,
-		pendingKeys:       c.cachedKeys,
-		pendingRemove:     c.cachedRemove,
-		pendingKeysSnap:   c.cachedKeys.Snapshot(),
-		pendingRemoveSnap: c.cachedRemove.Snapshot(),
+		dbSnapshot:    dbSnapshot,
+		pendingKeys:   c.cachedKeys,
+		pendingRemove: c.cachedRemove,
+	}
+	if cacheSnapshot.pendingKeys != nil {
+		cacheSnapshot.pendingKeysSnap = cacheSnapshot.pendingKeys.Snapshot()
+	}
+	if cacheSnapshot.pendingRemove != nil {
+		cacheSnapshot.pendingRemoveSnap = cacheSnapshot.pendingRemove.Snapshot()
 	}
 	c.cacheLock.RUnlock()
 	return cacheSnapshot, nil
@@ -491,7 +506,7 @@ func (c *dbCache) commitTreaps(pendingKeys, pendingRemove TreapForEacher) error 
 // cache to the underlying database.
 //
 // This function MUST be called with the database write lock held.
-func (c *dbCache) flush() error {
+func (c *dbCache) flush(tx *transaction) error {
 	c.lastFlush = time.Now()
 
 	// Sync the current write file associated with the block store.  This is
@@ -525,8 +540,14 @@ func (c *dbCache) flush() error {
 	c.cachedRemove = treap.NewImmutable()
 	c.cacheLock.Unlock()
 
-	cachedKeys.Recycle()
-	cachedRemove.Recycle()
+	cachedKeys.Recycle(nil)
+	cachedRemove.Recycle(nil)
+
+	// Make a note that cache was flushed so tx.snapshot.Release()
+	// can also call Recycle() to free more nodes.
+	if tx != nil && tx.snapshot != nil {
+		tx.snapshot.cacheFlushed++
+	}
 
 	return nil
 }
@@ -576,7 +597,7 @@ func (c *dbCache) commitTx(tx *transaction) error {
 	// Flush the cache and write the current transaction directly to the
 	// database if a flush is needed.
 	if c.needsFlush(tx) {
-		if err := c.flush(); err != nil {
+		if err := c.flush(tx); err != nil {
 			return err
 		}
 
@@ -646,7 +667,7 @@ func (c *dbCache) commitTx(tx *transaction) error {
 // This function MUST be called with the database write lock held.
 func (c *dbCache) Close() error {
 	// Flush any outstanding cached entries to disk.
-	if err := c.flush(); err != nil {
+	if err := c.flush(nil); err != nil {
 		// Even if there is an error while flushing, attempt to close
 		// the underlying database.  The error is ignored since it would
 		// mask the flush error.

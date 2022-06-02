@@ -319,7 +319,7 @@ func testWriteFailures(tc *testContext) bool {
 		file: &mockFile{forceSyncErr: true, maxSize: -1},
 	}
 	store.writeCursor.Unlock()
-	err := tc.db.(*db).cache.flush()
+	err := tc.db.(*db).cache.flush(nil)
 	if !checkDbError(tc.t, testName, err, database.ErrDriverSpecific) {
 		return false
 	}

@@ -21,6 +21,10 @@ type Mutable struct {
 	// totalSize is the best estimate of the total size of of all data in
 	// the treap including the keys, values, and node sizes.
 	totalSize uint64
+
+	// generation number is the constant mutableGeneration, unless
+	// creation of a treap.Iterator bumps it.
+	generation int
 }
 
 // Len returns the number of items stored in the treap.
@@ -113,7 +117,7 @@ func (t *Mutable) Put(key, value []byte) {
 
 	// The node is the root of the tree if there isn't already one.
 	if t.root == nil {
-		node := getTreapNode(key, value, rand.Int(), MutableGeneration)
+		node := getTreapNode(key, value, rand.Int(), t.generation)
 		t.count = 1
 		t.totalSize = nodeSize(node)
 		t.root = node
@@ -145,7 +149,7 @@ func (t *Mutable) Put(key, value []byte) {
 	}
 
 	// Link the new node into the binary tree in the correct position.
-	node := getTreapNode(key, value, rand.Int(), MutableGeneration)
+	node := getTreapNode(key, value, rand.Int(), t.generation)
 	t.count++
 	t.totalSize += nodeSize(node)
 	parent := parents.At(0)
@@ -190,7 +194,9 @@ func (t *Mutable) Delete(key []byte) {
 		t.root = nil
 		t.count = 0
 		t.totalSize = 0
-		putTreapNode(node)
+		if node.generation == t.generation && node.generation == mutableGeneration {
+			putTreapNode(node)
+		}
 		return
 	}
 
@@ -239,7 +245,9 @@ func (t *Mutable) Delete(key []byte) {
 	}
 	t.count--
 	t.totalSize -= nodeSize(node)
-	putTreapNode(node)
+	if node.generation == t.generation && node.generation == mutableGeneration {
+		putTreapNode(node)
+	}
 }
 
 // ForEach invokes the passed function with every key/value pair in the treap
@@ -276,7 +284,7 @@ func (t *Mutable) Reset() {
 // NewMutable returns a new empty mutable treap ready for use.  See the
 // documentation for the Mutable structure for more details.
 func NewMutable() *Mutable {
-	return &Mutable{}
+	return &Mutable{generation: mutableGeneration}
 }
 
 func (t *Mutable) Recycle() {
@@ -294,7 +302,7 @@ func (t *Mutable) Recycle() {
 			parents.Push(n)
 		}
 
-		if node.generation == MutableGeneration {
+		if node.generation == t.generation && node.generation == mutableGeneration {
 			putTreapNode(node)
 		}
 	}

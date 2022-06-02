@@ -48,11 +48,11 @@ type Immutable struct {
 
 	// snap is a pointer to a node in snapshot history linked list.
 	// A value nil means no snapshots are outstanding.
-	snap *SnapRecord
+	snap **SnapRecord
 }
 
 // newImmutable returns a new immutable treap given the passed parameters.
-func newImmutable(root *treapNode, count int, totalSize uint64, generation int, snap *SnapRecord) *Immutable {
+func newImmutable(root *treapNode, count int, totalSize uint64, generation int, snap **SnapRecord) *Immutable {
 	return &Immutable{root: root, count: count, totalSize: totalSize, generation: generation, snap: snap}
 }
 
@@ -111,7 +111,7 @@ func (t *Immutable) Get(key []byte) []byte {
 }
 
 // put inserts the passed key/value pair.
-func (t *Immutable) put(key, value []byte, bumpGen int) (tp *Immutable, old parentStack) {
+func (t *Immutable) put(key, value []byte) (tp *Immutable, old parentStack) {
 	// Use an empty byte slice for the value when none was provided.  This
 	// ultimately allows key existence to be determined from the value since
 	// an empty byte slice is distinguishable from nil.
@@ -121,8 +121,8 @@ func (t *Immutable) put(key, value []byte, bumpGen int) (tp *Immutable, old pare
 
 	// The node is the root of the tree if there isn't already one.
 	if t.root == nil {
-		root := getTreapNode(key, value, rand.Int(), t.generation+bumpGen)
-		return newImmutable(root, 1, nodeSize(root), t.generation+bumpGen, t.snap), parentStack{}
+		root := getTreapNode(key, value, rand.Int(), t.generation+1)
+		return newImmutable(root, 1, nodeSize(root), t.generation+1, t.snap), parentStack{}
 	}
 
 	// Find the binary tree insertion point and construct a replaced list of
@@ -169,11 +169,11 @@ func (t *Immutable) put(key, value []byte, bumpGen int) (tp *Immutable, old pare
 		newRoot := parents.At(parents.Len() - 1)
 		newTotalSize := t.totalSize - uint64(len(node.value)) +
 			uint64(len(value))
-		return newImmutable(newRoot, t.count, newTotalSize, t.generation+bumpGen, t.snap), oldParents
+		return newImmutable(newRoot, t.count, newTotalSize, t.generation+1, t.snap), oldParents
 	}
 
 	// Link the new node into the binary tree in the correct position.
-	node := getTreapNode(key, value, rand.Int(), t.generation+bumpGen)
+	node := getTreapNode(key, value, rand.Int(), t.generation+1)
 	parent := parents.At(0)
 	if compareResult < 0 {
 		parent.left = node
@@ -213,20 +213,21 @@ func (t *Immutable) put(key, value []byte, bumpGen int) (tp *Immutable, old pare
 		}
 	}
 
-	return newImmutable(newRoot, t.count+1, t.totalSize+nodeSize(node), t.generation+bumpGen, t.snap), oldParents
+	return newImmutable(newRoot, t.count+1, t.totalSize+nodeSize(node), t.generation+1, t.snap), oldParents
 }
 
-// Put is the immutable variant of put. Generation number is bumped, and old
-// nodes become garbage unless referenced elswhere.
+// Put is the immutable variant of put. Old nodes become garbage unless referenced elswhere.
 func (t *Immutable) Put(key, value []byte) *Immutable {
-	tp, _ := t.put(key, value, 1)
+	tp, _ := t.put(key, value)
 	return tp
 }
 
-// PutM is the mutable variant of put. Generation number is NOT bumped, and old
-// nodes are recycled if possible. This is only safe/useful in scenarios where
-// multiple Put/Delete() ops are applied to a unique treap and no snapshots/aliases
-// of the intermediate treap states are created or desired. For example:
+// PutM is the mutable variant of put. Old nodes are recycled if possible. This is
+// only safe in structured scenarios using SnapRecord to track treap instances.
+// The outstanding SnapRecords serve to protect nodes from recycling when they might
+// be present in one or more snapshots. This is useful in scenarios where multiple
+// Put/Delete() ops are applied to a treap and intermediate treap states are not
+// created or desired. For example:
 //
 //     for i := range keys {
 //         t = t.Put(keys[i])
@@ -242,15 +243,20 @@ func (t *Immutable) Put(key, value []byte) *Immutable {
 // snapshot records.
 //
 func PutM(dest **Immutable, key, value []byte, excluded *SnapRecord) {
-	tp, old := (*dest).put(key, value, 0)
+	tp, old := (*dest).put(key, value)
 	// Examine old nodes and recycle if possible.
 	snapRecordMutex.Lock()
 	defer snapRecordMutex.Unlock()
-	snapCount := (*dest).snapCount(excluded)
+	snapCount, maxSnap, minSnap := (*dest).snapCount(nil)
 	for old.Len() > 0 {
 		node := old.Pop()
-		if node.generation == tp.generation && snapCount == 0 {
+		if snapCount == 0 || node.generation > maxSnap.generation {
 			putTreapNode(node)
+		} else {
+			// Defer recycle until Release() on oldest snap (minSnap).
+			node.generation = recycleGeneration
+			node.next = minSnap.recycle
+			minSnap.recycle = node
 		}
 	}
 	*dest = tp
@@ -259,7 +265,7 @@ func PutM(dest **Immutable, key, value []byte, excluded *SnapRecord) {
 // del removes the passed key from the treap and returns the resulting treap
 // if it exists.  The original immutable treap is returned if the key does not
 // exist.
-func (t *Immutable) del(key []byte, bumpGen int) (d *Immutable, old parentStack) {
+func (t *Immutable) del(key []byte) (d *Immutable, old parentStack) {
 	// Find the node for the key while constructing a list of parents while
 	// doing so.
 	var oldParents parentStack
@@ -293,7 +299,7 @@ func (t *Immutable) del(key []byte, bumpGen int) (d *Immutable, old parentStack)
 	// being deleted, there is nothing else to do besides removing it.
 	parent := oldParents.At(1)
 	if parent == nil && delNode.left == nil && delNode.right == nil {
-		return newImmutable(nil, 0, 0, t.generation+bumpGen, t.snap), oldParents
+		return newImmutable(nil, 0, 0, t.generation+1, t.snap), oldParents
 	}
 
 	// Construct a replaced list of parents and the node to delete itself.
@@ -374,20 +380,21 @@ func (t *Immutable) del(key []byte, bumpGen int) (d *Immutable, old parentStack)
 		parent.left = nil
 	}
 
-	return newImmutable(newRoot, t.count-1, t.totalSize-nodeSize(delNode), t.generation+bumpGen, t.snap), oldParents
+	return newImmutable(newRoot, t.count-1, t.totalSize-nodeSize(delNode), t.generation+1, t.snap), oldParents
 }
 
-// Delete is the immutable variant of del. Generation number is bumped, and old
-// nodes become garbage unless referenced elswhere.
+// Delete is the immutable variant of del. Old nodes become garbage unless referenced elswhere.
 func (t *Immutable) Delete(key []byte) *Immutable {
-	tp, _ := t.del(key, 1)
+	tp, _ := t.del(key)
 	return tp
 }
 
-// DeleteM is the mutable variant of del. Generation number is NOT bumped, and old
-// nodes are recycled if possible. This is only safe/useful in scenarios where
-// multiple Put/Delete() ops are applied to a unique treap and no snapshots/aliases
-// of the intermediate treap states are created or desired. For example:
+// DeleteM is the mutable variant of del. Old nodes are recycled if possible. This is
+// only safe in structured scenarios using SnapRecord to track treap instances.
+// The outstanding SnapRecords serve to protect nodes from recycling when they might
+// be present in one or more snapshots. This is useful in scenarios where multiple
+// Put/Delete() ops are applied to a treap and intermediate treap states are not
+// created or desired. For example:
 //
 //     for i := range keys {
 //         t = t.Delete(keys[i])
@@ -403,15 +410,20 @@ func (t *Immutable) Delete(key []byte) *Immutable {
 // snapshot records.
 //
 func DeleteM(dest **Immutable, key []byte, excluded *SnapRecord) {
-	tp, old := (*dest).del(key, 0)
+	tp, old := (*dest).del(key)
 	// Examine old nodes and recycle if possible.
 	snapRecordMutex.Lock()
 	defer snapRecordMutex.Unlock()
-	snapCount := (*dest).snapCount(excluded)
+	snapCount, maxSnap, minSnap := (*dest).snapCount(nil)
 	for old.Len() > 0 {
 		node := old.Pop()
-		if node.generation == tp.generation && snapCount == 0 {
+		if snapCount == 0 || node.generation > maxSnap.generation {
 			putTreapNode(node)
+		} else {
+			// Defer recycle until Release() on oldest snap (minSnap).
+			node.generation = recycleGeneration
+			node.next = minSnap.recycle
+			minSnap.recycle = node
 		}
 	}
 	*dest = tp
@@ -447,31 +459,45 @@ func NewImmutable() *Immutable {
 	return &Immutable{}
 }
 
-// SnapRecord assists in tracking/releasing outstanding snapshots.
+// SnapRecord assists in tracking outstanding snapshots. While a SnapRecord
+// is present and has not been Released(), treap nodes at or below this
+// generation are protected from Recycle().
 type SnapRecord struct {
-	prev *SnapRecord
-	next *SnapRecord
+	generation int
+	rp         **SnapRecord
+	prev       *SnapRecord
+	next       *SnapRecord
+	recycle    *treapNode
 }
 
 var snapRecordMutex sync.Mutex
 
-// Snapshot makes a SnapRecord and linkis it into the snapshot history of a treap.
+// Snapshot makes a SnapRecord and links it into the snapshot history of a treap.
 func (t *Immutable) Snapshot() *SnapRecord {
 	snapRecordMutex.Lock()
 	defer snapRecordMutex.Unlock()
 
-	// Link this record so it follows the existing t.snap record, if any.
-	prev := t.snap
+	rp := t.snap
 	var next *SnapRecord = nil
-	if prev != nil {
-		next = prev.next
-	}
-	t.snap = &SnapRecord{prev: prev, next: next}
-	if prev != nil {
-		prev.next = t.snap
+	var prev *SnapRecord = nil
+	if rp != nil {
+		prev = *rp
+		if *rp != nil {
+			next = (*rp).next
+		}
 	}
 
-	return t.snap
+	// Create a new record stamped with the current generation. Link it
+	// following the existing snapshot record, if any.
+	p := new(*SnapRecord)
+	*p = &SnapRecord{generation: t.generation, rp: p, prev: prev, next: next}
+	t.snap = p
+
+	if rp != nil && *rp != nil {
+		(*rp).next = *(t.snap)
+	}
+
+	return *(t.snap)
 }
 
 // Release of SnapRecord unlinks that record from the snapshot history of a treap.
@@ -480,45 +506,73 @@ func (r *SnapRecord) Release() {
 	defer snapRecordMutex.Unlock()
 
 	// Unlink this record.
-	if r.prev != nil {
-		r.prev.next = r.next
-	}
+	*(r.rp) = nil
 	if r.next != nil {
 		r.next.prev = r.prev
+		*(r.rp) = r.next
+	}
+	if r.prev != nil {
+		r.prev.next = r.next
+		*(r.rp) = r.prev
+	}
+
+	// Handle deferred recycle list.
+	for node := r.recycle; node != nil; {
+		next := node.next
+		putTreapNode(node)
+		node = next
 	}
 }
 
 // snapCount returns the number of snapshots outstanding which were created
 // but not released. When snapshots are absent, mutable PutM()/DeleteM() can
-// recycle nodes more aggressively. The record "exclude" is not counted.
-func (t *Immutable) snapCount(exclude *SnapRecord) int {
+// recycle nodes more aggressively. The record "excluded" is not counted.
+func (t *Immutable) snapCount(excluded *SnapRecord) (count int, maxSnap, minSnap *SnapRecord) {
 	// snapRecordMutex should be locked already
 
-	sum := 0
-	if t.snap == nil {
+	count, maxSnap, minSnap = 0, nil, nil
+	if t.snap == nil || *(t.snap) == nil {
 		// No snapshots.
-		return sum
+		return count, maxSnap, minSnap
 	}
 
 	// Count snapshots taken BEFORE creation of this instance.
-	for h := t.snap; h != nil; h = h.prev {
-		if h != exclude {
-			sum++
+	for h := *(t.snap); h != nil; h = h.prev {
+		if h != excluded {
+			count++
+			if maxSnap == nil || maxSnap.generation < h.generation {
+				maxSnap = h
+			}
+			if minSnap == nil || minSnap.generation > h.generation {
+				minSnap = h
+			}
 		}
 	}
 
 	// Count snapshots taken AFTER creation of this instance.
-	for h := t.snap.next; h != nil; h = h.next {
-		if h != exclude {
-			sum++
+	for h := (*(t.snap)).next; h != nil; h = h.next {
+		if h != excluded {
+			count++
+			if maxSnap == nil || maxSnap.generation < h.generation {
+				maxSnap = h
+			}
+			if minSnap == nil || minSnap.generation > h.generation {
+				minSnap = h
+			}
 		}
 	}
 
-	return sum
+	return count, maxSnap, minSnap
 }
 
-func (t *Immutable) Recycle() {
-	snapCount := t.snapCount(nil) - 1
+func (t *Immutable) Recycle(excluded *SnapRecord) {
+	snapRecordMutex.Lock()
+	_, maxSnap, _ := t.snapCount(excluded)
+	snapGen := 0
+	if maxSnap != nil {
+		snapGen = maxSnap.generation
+	}
+	snapRecordMutex.Unlock()
 
 	var parents parentStack
 	for node := t.root; node != nil; node = node.left {
@@ -534,7 +588,10 @@ func (t *Immutable) Recycle() {
 			parents.Push(n)
 		}
 
-		if node.generation == t.generation && snapCount == 0 {
+		// Recycle node if it cannot be in a snapshot. Note that nodes
+		// scheduled for deferred recycling will have negative generation
+		// (recycleGeneration) and will not qualify.
+		if node.generation > snapGen {
 			putTreapNode(node)
 		}
 	}
