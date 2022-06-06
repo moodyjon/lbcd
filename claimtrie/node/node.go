@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"sync"
+	"sync/atomic"
 
 	"github.com/lbryio/lbcd/claimtrie/change"
 	"github.com/lbryio/lbcd/claimtrie/param"
@@ -16,24 +16,19 @@ type Node struct {
 	Claims      ClaimList // List of all Claims.
 	Supports    ClaimList // List of all Supports, including orphaned ones.
 	SupportSums map[change.ClaimID]int64
+	refcnt      int32
 }
 
 // New returns a new node.
 func New() *Node {
-	return &Node{SupportSums: map[change.ClaimID]int64{}}
+	return &Node{SupportSums: map[change.ClaimID]int64{}, refcnt: 1}
 }
 
 func (n *Node) HasActiveBestClaim() bool {
 	return n.BestClaim != nil && n.BestClaim.Status == Activated
 }
 
-var claimPool = sync.Pool{
-	New: func() interface{} {
-		return &Claim{}
-	},
-}
-
-func (n *Node) Close() {
+func (n *Node) close() {
 	n.BestClaim = nil
 	n.SupportSums = nil
 
@@ -46,6 +41,17 @@ func (n *Node) Close() {
 		claimPool.Put(n.Supports[i])
 	}
 	n.Supports = nil
+}
+
+func (n *Node) Close() {
+	new := atomic.AddInt32(&n.refcnt, -1)
+	if new < 0 {
+		panic("node refcnt underflow")
+	}
+	if new > 0 {
+		return
+	}
+	n.close()
 }
 
 func (n *Node) ApplyChange(chg change.Change, delay int32) error {
@@ -377,12 +383,12 @@ func (n *Node) Clone() *Node {
 	}
 	clone.Supports = make(ClaimList, len(n.Supports))
 	for i, support := range n.Supports {
-		clone.Supports[i] = &Claim{}
+		clone.Supports[i] = claimPool.Get().(*Claim)
 		*clone.Supports[i] = *support
 	}
 	clone.Claims = make(ClaimList, len(n.Claims))
 	for i, claim := range n.Claims {
-		clone.Claims[i] = &Claim{}
+		clone.Claims[i] = claimPool.Get().(*Claim)
 		*clone.Claims[i] = *claim
 	}
 	clone.TakenOverAt = n.TakenOverAt

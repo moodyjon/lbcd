@@ -78,7 +78,9 @@ func (nm *BaseManager) NodeAt(height int32, name []byte) (*Node, error) {
 		if nm.tempChanges != nil { // making an assumption that we only ever have tempChanges for a single block
 			changes = append(changes, nm.tempChanges[string(name)]...)
 		}
+		old := n
 		n = n.Clone()
+		old.Close()
 		updated, err := nm.updateFromChanges(n, changes, height)
 		if err != nil {
 			if n != nil {
