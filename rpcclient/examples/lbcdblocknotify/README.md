@@ -1,15 +1,21 @@
-# lbcd Websockets Example
+# lbcdbloknotify
 
-This example shows how to use the rpcclient package to connect to a btcd RPC
-server using TLS-secured websockets, register for block connected and block
-disconnected notifications, and get the current block count.
+This bridge program subscribes to lbcd's notifications over websockets using the rpcclient package.
+Users can specify supported actions upon receiving this notifications.
 
-## Running the Example
+## Building(or Running) the Program
 
-The first step is to clone the lbcd package:
+Clone the lbcd package:
 
 ```bash
 $ git clone github.com/lbryio/lbcd
+$ cd lbcd/rpcclient/examples
+
+# build the program
+$ go build .
+
+# or directly run it (build implicitly behind the scene)
+$ go run .
 ```
 
 Display available options:
@@ -30,18 +36,29 @@ $ go run . -h
   -stratumpass string
         Stratum server password (default "password")
   -quiet
-        Do not print logs
+        Do not print periodic logs
 ```
 
-Start the program:
+Running the program:
 
 ```bash
-$ go run . -stratumpass <STRATUM PASSWD> -rpcuser <RPC USERNAME> -rpcpass <RPC PASSWD>
+# Send stratum mining.update_block mesage upon receving block connected notifiations.
+$ go run . -rpcuser <RPC USERNAME> -rpcpass <RPC PASSWD> --notls -stratum <STRATUM SERVER> -stratumpass <STRATUM PASSWD>
 
-2022/01/10 23:16:21 NotifyBlocks: Registration Complete
-2022/01/10 23:16:21 Block count: 1093112
+2022/01/10 23:16:21 Current block count: 1093112
 ...
+
+# Execute a custome command (with blockhash) upon receving block connected notifiations.
+$ go run . -rpcuser <RPC USERNAME> -rpcpass <RPC PASSWD> --notls -run "echo %s"
 ```
+
+## Notes
+
+* Stratum TCP connection is persisted with auto-reconnect. (retry backoff increases from 1s to 60s maximum)
+
+* Stratum update_block jobs on previous notifications are canceled when a new notification arrives.
+  Usually, the jobs are so short and completed immediately.  However, if the Stratum connection is broken, this
+  prevents the bridge from accumulating stale jobs.
 
 ## License
 
